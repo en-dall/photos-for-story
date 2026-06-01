@@ -41,7 +41,7 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 5px;
+            gap: 10px;
             margin: 5px 0;
         }
         .radio-label {
@@ -51,18 +51,20 @@
         .radio-options {
             display: flex;
             justify-content: center;
-            gap: 15px;
+            gap: 12px;
             flex-wrap: wrap;
         }
         .radio-options label {
             background: #3a3a3a;
-            padding: 6px 12px;
-            border-radius: 4px;
+            padding: 10px 14px;
+            border-radius: 6px;
             border: 1px solid #555;
             cursor: pointer;
             display: flex;
+            flex-direction: column;
             align-items: center;
-            gap: 6px;
+            gap: 10px;
+            min-width: 80px;
             transition: background 0.2s, border-color 0.2s;
         }
         .radio-options input[type="radio"] {
@@ -72,10 +74,104 @@
         .radio-options label:hover {
             background: #4a4a4a;
         }
-        .radio-options input[type="radio"]:checked + span {
+        
+        /* ラジオボタン選択時のスタイル変更 */
+        .radio-options label:has(input[type="radio"]:checked) {
+            border-color: #007aff;
+            background: #2f3e50;
+        }
+        .radio-options label:has(input[type="radio"]:checked) .note-text {
             color: #007aff;
             font-weight: bold;
         }
+        .radio-options label:has(input[type="radio"]:checked) .note-icon {
+            background-color: #007aff; /* 選択時に音符の色を青に変える */
+        }
+        .radio-options label:has(input[type="radio"]:checked) .note-head.note-half {
+            border-color: #007aff;
+        }
+
+        .note-text {
+            font-size: 0.8em;
+            color: #aaa;
+        }
+
+        /* --- CSSで作る絶対崩れない音符アイコン --- */
+        .note-icon {
+            position: relative;
+            width: 30px;
+            height: 30px;
+            background-color: transparent;
+        }
+        
+        /* 音符の「たま（符頭）」の共通設定 */
+        .note-head {
+            position: absolute;
+            bottom: 2px;
+            left: 2px;
+            width: 12px;
+            height: 9px;
+            border-radius: 50%;
+            transform: rotate(-25deg);
+        }
+        /* 4分・8分・16分は黒塗り玉 */
+        .note-black { background-color: #fff; }
+        /* 2分音符は白抜き玉 */
+        .note-half { 
+            background-color: transparent; 
+            border: 2px solid #fff; 
+            box-sizing: border-box;
+            width: 13px;
+            height: 10px;
+        }
+
+        /* 音符の「ぼう（符幹）」の共通設定 */
+        .note-stem {
+            position: absolute;
+            bottom: 6px;
+            left: 12px;
+            width: 2px;
+            height: 20px;
+            background-color: #fff;
+        }
+
+        /* 8分音符の「はた（符尾）」 */
+        .note-flag-8 {
+            position: absolute;
+            top: 4px;
+            left: 14px;
+            width: 8px;
+            height: 10px;
+            border-right: 2px solid #fff;
+            border-top: 2px solid #fff;
+            border-radius: 0 6px 4px 0;
+            transform: skewX(15deg);
+        }
+
+        /* 16分音符の「はた（2本）」 */
+        .note-flag-16-1 {
+            position: absolute;
+            top: 4px;
+            left: 14px;
+            width: 8px;
+            height: 8px;
+            border-right: 2px solid #fff;
+            border-top: 2px solid #fff;
+            border-radius: 0 5px 3px 0;
+            transform: skewX(15deg);
+        }
+        .note-flag-16-2 {
+            position: absolute;
+            top: 9px;
+            left: 14px;
+            width: 7px;
+            height: 7px;
+            border-right: 2px solid #fff;
+            border-top: 2px solid #fff;
+            border-radius: 0 5px 3px 0;
+            transform: skewX(15deg);
+        }
+
         .button-group {
             width: 100%;
             display: flex;
@@ -142,19 +238,38 @@
             <div class="radio-options">
                 <label>
                     <input type="radio" name="note-radio" value="0.5">
-                    <span>𝅗𝅥</span>
+                    <div class="note-icon">
+                        <div class="note-head note-half"></div>
+                        <div class="note-stem"></div>
+                    </div>
+                    <span class="note-text">2分音符 (2拍)</span>
                 </label>
                 <label>
                     <input type="radio" name="note-radio" value="1">
-                    <span>♩</span>
+                    <div class="note-icon">
+                        <div class="note-head note-black"></div>
+                        <div class="note-stem"></div>
+                    </div>
+                    <span class="note-text">4分音符 (1拍)</span>
                 </label>
                 <label>
                     <input type="radio" name="note-radio" value="2" checked>
-                    <span>♪</span>
+                    <div class="note-icon">
+                        <div class="note-head note-black"></div>
+                        <div class="note-stem"></div>
+                        <div class="note-flag-8"></div>
+                    </div>
+                    <span class="note-text">8分音符 (0.5拍)</span>
                 </label>
                 <label>
                     <input type="radio" name="note-radio" value="4">
-                    <span>𝅿</span>
+                    <div class="note-icon">
+                        <div class="note-head note-black"></div>
+                        <div class="note-stem"></div>
+                        <div class="note-flag-16-1"></div>
+                        <div class="note-flag-16-2"></div>
+                    </div>
+                    <span class="note-text">16分音符 (0.25拍)</span>
                 </label>
             </div>
         </div>
@@ -197,7 +312,6 @@
         let totalFrames = 0;
         let currentFrameCount = 0;
 
-        // 選択されているラジオボタンの値を取得する関数
         function getSelectedNoteModifier() {
             const checkedRadio = document.querySelector('input[name="note-radio"]:checked');
             return checkedRadio ? parseFloat(checkedRadio.value) : 2;
@@ -228,12 +342,10 @@
             `;
         }
 
-        // 入力値変更イベントの設定
         [bpmInput, durationInput].forEach(element => {
             element.addEventListener('input', updateRequirements);
         });
         
-        // ラジオボタンの変更イベントを設定
         document.querySelectorAll('input[name="note-radio"]').forEach(radio => {
             radio.addEventListener('change', updateRequirements);
         });
