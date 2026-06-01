@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>3分割BPM同期ビューア</title>
+    <style>
+        body { font-family: sans-serif; background: #222; color: #fff; text-align: center; padding: 20px; }
+        #canvas-container { margin: 20px auto; max-width: 600px; }
+        canvas { background: #000; width: 100%; height: auto; border: 1px solid #444; }
+        .controls { margin: 15px; }
+        input[type="number"], select { padding: 5px; margin: 0 5px; background: #333; color: #fff; border: 1px solid #555; }
+        input[type="number"] { width: 70px; }
+        button { padding: 6px 12px; margin: 0 5px; cursor: pointer; background: #444; color: #fff; border: 1px solid #666; }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .info { font-size: 0.9em; color: #aaa; margin-top: 5px; }
+    </style>
+</head>
+<body>
+
+    <h2>3分割BPM同期ビューア & エクスポーター</h2>
+    
+    <div class="controls">
+        <input type="file" id="file-input" multiple accept="image/*">
+    </div>
+    
+    <div class="controls">
+        <label>BPM: <input type="number" id="bpm-input" value="120" min="20" max="300"></label>
+        <label>タイミング: 
+            <select id="note-input">
+                <option value="1">4分音符 (1拍ごと)</option>
+                <option value="2" selected>8分音符 (0.5拍ごと)</option>
+                <option value="4">16分音符 (0.25拍ごと)</option>
+                <option value="0.5">2分音符 (2拍ごと)</option>
+            </select>
+        </label>
+        <button id="start-btn" disabled>再生 / 録画開始</button>
+        <button id="stop-btn" disabled>停止して保存</button>
+        <div class="info" id="fps-info">算出FPS: --</div>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="viewer-canvas" width="600" height="900"></canvas>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('file-input');
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const canvas = document.getElementById('viewer-canvas');
+        const ctx = canvas.getContext('2d');
+        const bpmInput = document.getElementById('bpm-input');
+        const noteInput = document.getElementById('note-input');
+        const fpsInfo = document.getElementById('fps-info');
+
+        let images = [];
+        let animationId = null;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let currentIndex = 0;
+
+        // 画像のローカル読み込み
+        fileInput.addEventListener('change', (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length < 3) {
+                alert('画像は3枚以上選択してください。');
+                return;
+            }
+
+            // 更新日時（古い順）でソート
+            files.sort((a, b) => a.lastModified - b.lastModified);
+
+            images = [];
+            let loadedCount = 0;
+
+            files.forEach((file) => {
+                const img = new Image();
+                img.src = URL.createObjectURL(file);
+                img.onload = () => {
+                    images.push(img);
+                    loadedCount++;
+                    if (loadedCount === files.length) {
+                        startBtn.disabled = false;
+                        alert(`${images.length}枚の画像を読み込みました。準備完了です。`);
+                    }
+                };
+            });
+        });
+
+        // 比率維持・中央配置で3分割描画するメインループ
+        function drawFrame() {
+            const paneH = canvas.height / 3;
+            const paneW = canvas.width;
+
+            const img1 = images[currentIndex % images.length];
+            const img2 = images[(currentIndex + 1) % images.length];
+            const img3 = images[(currentIndex + 2) % images.length];
+
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            function drawImageContain(img, offsetY) {
+                const imgRatio = img.width / img.height;
+                const paneRatio = paneW / paneH;
+                let drawW, drawH, drawX, drawY;
+
+                if (imgRatio > paneRatio) {
+                    drawW = paneW;
+                    drawH = paneW / imgRatio;
+                    drawX = 0;
+                    drawY = offsetY + (paneH - drawH) / 2;
+                } else {
+                    drawH = paneH;
+                    drawW = paneH * imgRatio;
+                    drawX = (paneW - drawW) / 2;
+                    drawY = offsetY;
+                }
+                ctx.drawImage(img, drawX, drawY, drawW, drawH);
+            }
+
+            drawImageContain(img1, 0);
+            drawImageContain(img2, paneH);
+            drawImageContain(img3, paneH * 2);
+
+            currentIndex++;
+        }
+
+        // 再生・録画開始
+        startBtn.addEventListener('click', () => {
+            const bpm = parseFloat(bpmInput.value);
+            const noteModifier = parseFloat(noteInput.value); // 4分音符に対して何倍細かいか
+            
+            // 1秒あたりの拍数(BPM/60) × 音符の倍率 = 必要FPS
+            const fps = (bpm / 60) * noteModifier;
+            fpsInfo.textContent = `算出FPS: ${fps.toFixed(2)} (1秒間に${fps.toFixed(1)}回切り替え)`;
+
+            currentIndex = 0;
+            recordedChunks = [];
+
+            // 録画ストリーム設定
+            const stream = canvas.captureStream(fps);
+            mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+            
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) recordedChunks.push(e.data);
+            };
+
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `output_bpm${bpm}.webm`;
+                a.click();
+            };
+
+            mediaRecorder.start();
+            
+            const interval = 1000 / fps;
+            let lastTime = 0;
+            
+            function loop(timestamp) {
+                if (!lastTime) lastTime = timestamp;
+                const elapsed = timestamp - lastTime;
+
+                if (elapsed >= interval) {
+                    drawFrame();
+                    lastTime = timestamp;
+                }
+                animationId = requestAnimationFrame(loop);
+            }
+            
+            animationId = requestAnimationFrame(loop);
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+        });
+
+        // 停止・動画出力
+        stopBtn.addEventListener('click', () => {
+            cancelAnimationFrame(animationId);
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+        });
+    </script>
+</body>
+</html>
