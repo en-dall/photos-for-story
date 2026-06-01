@@ -85,13 +85,12 @@
         /* --- Noto Music 専用の文字スタイル --- */
         .music-note {
             font-family: 'Noto Music', sans-serif;
-            font-size: 24px; /* 音符の大きさを綺麗にコントロール */
+            font-size: 24px; 
             color: #fff;
             line-height: 1;
             user-select: none;
         }
         
-        /* 選択時に音符の文字色を青に変える */
         .radio-options label:has(input[type="radio"]:checked) .music-note {
             color: #007aff;
         }
@@ -126,6 +125,7 @@
             display: flex;
             justify-content: center;
             margin-top: 5px;
+            gap: 10px;
         }
         input[type="file"] { font-family: 'M PLUS 1p', sans-serif; }
         input[type="number"], input[type="color"] { 
@@ -152,13 +152,23 @@
         }
         button:hover { background: #0063cc; }
         button:disabled { background: #444; color: #888; cursor: not-allowed; }
+        
+        /* クリアボタンのスタイル */
+        .clear-btn {
+            background: #3a3a3a;
+            border: 1px solid #555;
+        }
+        .clear-btn:hover {
+            background: #ff3b30;
+            border-color: #ff3b30;
+        }
+
         #canvas-container { margin: 30px auto; max-width: 360px; } 
         canvas { background: #000; width: 100%; height: auto; border-radius: 8px; box-shadow: 0 8px 16px rgba(0,0,0,0.5); }
         .info { font-size: 0.9em; color: #aaa; width: 100%; text-align: center; margin-top: 5px; line-height: 1.6; }
         .status-match { color: #34c759; font-weight: bold; }
         .status-loop { color: #ff9500; font-weight: bold; }
         
-        /* プライバシーポリシーのスタイル */
         .privacy-policy {
             font-size: 0.75em; 
             color: #666; 
@@ -205,21 +215,26 @@
             <div class="radio-options">
                 <label>
                     <input type="radio" name="note-radio" value="0.5">
-                    <span class="music-note">&#x1D15E;</span> </label>
+                    <span class="music-note">&#x1D15E;</span>
+                </label>
                 <label>
                     <input type="radio" name="note-radio" value="1">
-                    <span class="music-note">&#x1D15F;</span> </label>
+                    <span class="music-note">&#x1D15F;</span>
+                </label>
                 <label>
                     <input type="radio" name="note-radio" value="2" checked>
-                    <span class="music-note">&#x1D160;</span> </label>
+                    <span class="music-note">&#x1D160;</span>
+                </label>
                 <label>
                     <input type="radio" name="note-radio" value="4">
-                    <span class="music-note">&#x1D161;</span> </label>
+                    <span class="music-note">&#x1D161;</span>
+                </label>
             </div>
         </div>
         
         <div class="button-group">
             <button id="start-btn" disabled>動画生成（自動保存）</button>
+            <button id="clear-btn" class="clear-btn" type="button">選択解除</button>
         </div>
         
         <div class="info" id="fps-info">
@@ -240,6 +255,7 @@
     <script>
         const fileInput = document.getElementById('file-input');
         const startBtn = document.getElementById('start-btn');
+        const clearBtn = document.getElementById('clear-btn');
         const canvas = document.getElementById('viewer-canvas');
         const ctx = canvas.getContext('2d');
         const bpmInput = document.getElementById('bpm-input');
@@ -247,6 +263,7 @@
         const bgColorInput = document.getElementById('bg-color');
         const fpsInfo = document.getElementById('fps-info');
 
+        // 内部に保持する永続画像リスト
         let images = [];
         let animationId = null;
         let mediaRecorder = null;
@@ -302,6 +319,8 @@
                     statusText = ` <span class="status-loop">(不足分は頭からループ再生されます)</span>`;
                     startBtn.disabled = false;
                 }
+            } else {
+                startBtn.disabled = true;
             }
 
             fpsInfo.innerHTML = `
@@ -326,32 +345,74 @@
             radio.addEventListener('change', updateRequirements);
         });
 
+        // 選択解除（クリア）ボタンの挙動
+        clearBtn.addEventListener('click', () => {
+            images = [];
+            fileInput.value = ""; // フォームを初期化
+            updateRequirements();
+            alert('選択されていた画像をすべてクリアしました。');
+        });
+
         fileInput.addEventListener('change', (e) => {
             const files = Array.from(e.target.files);
-            const splitCount = getSelectedSplitCount();
-            if (files.length < splitCount) {
-                alert(`選択した分割数のため、画像は${splitCount}枚以上必要です。`);
-                return;
-            }
+            if (files.length === 0) return;
 
-            files.sort((a, b) => a.lastModified - b.lastModified);
-
-            images = [];
             let loadedCount = 0;
+            let skippedCount = 0;
 
             files.forEach((file) => {
+                // 重複チェック：ファイル名、容量、更新日時がすべて一致するものが既存リストにあればスキップ
+                const isDuplicate = images.some(existingImg => 
+                    existingImg._meta &&
+                    existingImg._meta.name === file.name &&
+                    existingImg._meta.size === file.size &&
+                    existingImg._meta.lastModified === file.lastModified
+                );
+
+                if (isDuplicate) {
+                    skippedCount++;
+                    loadedCount++;
+                    // すべてのファイルの評価が終わったか判定
+                    if (loadedCount === files.length) {
+                        finalizeImageLoading(skippedCount);
+                    }
+                    return;
+                }
+
                 const img = new Image();
                 img.src = URL.createObjectURL(file);
+                
+                // 重複判定に使うメタデータを画像オブジェクトに隠し持たせる
+                img._meta = {
+                    name: file.name,
+                    size: file.size,
+                    lastModified: file.lastModified
+                };
+
                 img.onload = () => {
                     images.push(img);
                     loadedCount++;
                     if (loadedCount === files.length) {
-                        updateRequirements();
-                        alert(`${images.length}枚の画像を読み込みました。準備完了です。`);
+                        finalizeImageLoading(skippedCount);
                     }
                 };
             });
         });
+
+        // 画像の追加読み込み、重複排除、および再ソートの最終処理
+        function finalizeImageLoading(skippedCount) {
+            // リスト全体をもう一度最初から「タイムスタンプ（更新日時）が古い順」に完全再ソート
+            images.sort((a, b) => a._meta.lastModified - b._meta.lastModified);
+            
+            updateRequirements();
+            fileInput.value = ""; // 追加読み込みを連続して行えるようにリセット
+
+            let msg = `現在、合計 ${images.length} 枚の画像が保持されています。`;
+            if (skippedCount > 0) {
+                msg += `\n(重複した画像 ${skippedCount} 枚を自動でスキップしました)`;
+            }
+            alert(msg);
+        }
 
         function drawFrame() {
             const splitCount = getSelectedSplitCount();
