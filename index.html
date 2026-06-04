@@ -356,6 +356,7 @@
 
             let loadedCount = 0;
             let skippedCount = 0;
+            const splitCount = getSelectedSplitCount();
 
             files.forEach((file) => {
                 const isDuplicate = images.some(existingImg => 
@@ -374,20 +375,41 @@
                     return;
                 }
 
-                const img = new Image();
-                img.src = URL.createObjectURL(file);
+                const srcImg = new Image();
+                srcImg.src = URL.createObjectURL(file);
                 
-                img._meta = {
-                    name: file.name,
-                    size: file.size,
-                    lastModified: file.lastModified
-                };
+                srcImg.onload = () => {
+                    // 読み込んだ1枚の画像を、現在の画面分割数(2〜4)に合わせて裏で自動切断する
+                    const sliceH = srcImg.height / splitCount;
+                    
+                    for (let i = 0; i < splitCount; i++) {
+                        const sliceCanvas = document.createElement('canvas');
+                        sliceCanvas.width = srcImg.width;
+                        sliceCanvas.height = sliceH;
+                        const sliceCtx = sliceCanvas.getContext('2d');
+                        
+                        // 画像の該当する段（上・中・下など）を切り抜いてキャンバスにコピー
+                        sliceCtx.drawImage(srcImg, 0, sliceH * i, srcImg.width, sliceH, 0, 0, srcImg.width, sliceH);
+                        
+                        const slicedImg = new Image();
+                        slicedImg.src = sliceCanvas.toDataURL('image/jpeg', 0.9);
+                        
+                        // メタデータをパーツごとに偽装して保持（ソート順が狂わないようにインデックスも加算）
+                        slicedImg._meta = {
+                            name: `${file.name}_part${i}`,
+                            size: file.size,
+                            lastModified: file.lastModified + i // 1枚の中で「上→中→下」の順に並ぶようにわずかにズラす
+                        };
+                        
+                        images.push(slicedImg);
+                    }
 
-                img.onload = () => {
-                    images.push(img);
                     loadedCount++;
                     if (loadedCount === files.length) {
-                        finalizeImageLoading(skippedCount);
+                        // 少し時間を置いてDataURLの生成完了を待ってから処理
+                        setTimeout(() => {
+                            finalizeImageLoading(skippedCount);
+                        }, 200);
                     }
                 };
             });
@@ -398,7 +420,7 @@
             updateRequirements();
             fileInput.value = ""; 
 
-            let msg = `現在、合計 ${images.length} 枚の画像が保持されています。`;
+            let msg = `1枚の画像を ${getSelectedSplitCount()} 分割にスライスしました。\n現在、合計 ${images.length} 個の画像パーツが保持されています。`;
             if (skippedCount > 0) {
                 msg += `\n(重複した画像 ${skippedCount} 枚を自動でスキップしました)`;
             }
@@ -414,66 +436,33 @@
             ctx.fillStyle = bgColor;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // 背景ボカシ ＋ 全面フィット（見切れなし）のハイブリッド描画関数
-            function drawImageWithBlurBackground(img, offsetY) {
+            // 切り分けた画像を枠に合わせて拡大フィットさせる
+            function drawImageWithFullStretch(img, offsetY) {
                 const padding = 20; 
                 const maxW = paneW - (padding * 2);
                 const maxH = paneH - (padding * 2);
 
+                const imgRatio = img.width / img.height;
+                const targetRatio = maxW / maxH;
+                
+                let sWidth, sHeight, sx, sy;
+
+                if (imgRatio > targetRatio) {
+                    sHeight = img.height;
+                    sWidth = img.height * targetRatio;
+                    sx = (img.width - sWidth) / 2;
+                    sy = 0;
+                } else {
+                    sWidth = img.width;
+                    sHeight = img.width / targetRatio;
+                    sx = 0;
+                    sy = (img.height - sHeight) / 2;
+                }
+
                 const drawX = padding;
                 const drawY = offsetY + padding;
 
-                const imgRatio = img.width / img.height;
-                const targetRatio = maxW / maxH;
-
-                ctx.save();
-                
-                // 1. クリッピング（枠外にはみ出させない領域制限）
-                let clipPath = new Path2D();
-                clipPath.rect(drawX, drawY, maxW, maxH);
-                ctx.clip(clipPath);
-
-                // 2. 背面に枠いっぱいに広げたボカシ背景を描画
-                ctx.filter = 'blur(30px)'; // 30pxの強めのボカシを適用
-                
-                let bgW, bgH, bgX, bgY;
-                if (imgRatio > targetRatio) {
-                    bgW = maxW;
-                    bgH = maxW / imgRatio;
-                    bgX = drawX;
-                    bgY = drawY + (maxH - bgH) / 2;
-                } else {
-                    bgH = maxH;
-                    bgW = maxH * imgRatio;
-                    bgX = drawX + (maxW - bgW) / 2;
-                    bgY = drawY;
-                }
-                // 背景用に少しだけ余分に外側へ引き伸ばして黒い隙間を埋める
-                ctx.drawImage(img, drawX, drawY, maxW, maxH);
-                
-                // フィルター効果を一度解除
-                ctx.filter = 'none';
-
-                // 3. 背景の上に「うっすら黒い半透明マスク」をのせて、中央の写真を際立たせる
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-                ctx.fillRect(drawX, drawY, maxW, maxH);
-
-                // 4. 前面に「見切れなし（Fit）」で本来の写真を綺麗に重ねる
-                let fitW, fitH, fitX, fitY;
-                if (imgRatio > targetRatio) {
-                    fitW = maxW;
-                    fitH = maxW / imgRatio;
-                    fitX = drawX;
-                    fitY = drawY + (maxH - fitH) / 2;
-                } else {
-                    fitH = maxH;
-                    fitW = maxH * imgRatio;
-                    fitX = drawX + (maxW - fitW) / 2;
-                    fitY = drawY;
-                }
-                ctx.drawImage(img, fitX, fitY, fitW, fitH);
-
-                ctx.restore();
+                ctx.drawImage(img, sx, sy, sWidth, sHeight, drawX, drawY, maxW, maxH);
             }
 
             if (sequenceStep < splitCount) {
@@ -481,7 +470,7 @@
                 currentIndex++;
                 
                 for (let i = 0; i <= sequenceStep; i++) {
-                    drawImageWithBlurBackground(images[paneIndices[i] % images.length], paneH * i);
+                    drawImageWithFullStretch(images[paneIndices[i] % images.length], paneH * i);
                 }
             } 
             else {
@@ -490,7 +479,7 @@
                 currentIndex++;
 
                 for (let i = 0; i < splitCount; i++) {
-                    drawImageWithBlurBackground(images[paneIndices[i] % images.length], paneH * i);
+                    drawImageWithFullStretch(images[paneIndices[i] % images.length], paneH * i);
                 }
             }
 
