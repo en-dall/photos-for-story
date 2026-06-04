@@ -379,34 +379,42 @@
                 srcImg.src = URL.createObjectURL(file);
                 
                 srcImg.onload = () => {
-                    // 読み込んだ1枚の画像を、現在の画面分割数(2〜4)に合わせて裏で自動切断する
-                    const sliceH = srcImg.height / splitCount;
-                    
-                    for (let i = 0; i < splitCount; i++) {
-                        const sliceCanvas = document.createElement('canvas');
-                        sliceCanvas.width = srcImg.width;
-                        sliceCanvas.height = sliceH;
-                        const sliceCtx = sliceCanvas.getContext('2d');
-                        
-                        // 画像の該当する段（上・中・下など）を切り抜いてキャンバスにコピー
-                        sliceCtx.drawImage(srcImg, 0, sliceH * i, srcImg.width, sliceH, 0, 0, srcImg.width, sliceH);
-                        
-                        const slicedImg = new Image();
-                        slicedImg.src = sliceCanvas.toDataURL('image/jpeg', 0.9);
-                        
-                        // メタデータをパーツごとに偽装して保持（ソート順が狂わないようにインデックスも加算）
-                        slicedImg._meta = {
-                            name: `${file.name}_part${i}`,
+                    // ★ 縦横比の自動判定ロジックを追加 ★
+                    if (srcImg.width >= srcImg.height) {
+                        // 横長、または正方形の写真ならスライスせずにそのまま1枚の画像として扱う
+                        srcImg._meta = {
+                            name: file.name,
                             size: file.size,
-                            lastModified: file.lastModified + i // 1枚の中で「上→中→下」の順に並ぶようにわずかにズラす
+                            lastModified: file.lastModified
                         };
+                        images.push(srcImg);
+                    } else {
+                        // 縦長の写真のときだけ、指定された分割数に合わせて裏で自動切断する
+                        const sliceH = srcImg.height / splitCount;
                         
-                        images.push(slicedImg);
+                        for (let i = 0; i < splitCount; i++) {
+                            const sliceCanvas = document.createElement('canvas');
+                            sliceCanvas.width = srcImg.width;
+                            sliceCanvas.height = sliceH;
+                            const sliceCtx = sliceCanvas.getContext('2d');
+                            
+                            sliceCtx.drawImage(srcImg, 0, sliceH * i, srcImg.width, sliceH, 0, 0, srcImg.width, sliceH);
+                            
+                            const slicedImg = new Image();
+                            slicedImg.src = sliceCanvas.toDataURL('image/jpeg', 0.9);
+                            
+                            slicedImg._meta = {
+                                name: `${file.name}_part${i}`,
+                                size: file.size,
+                                lastModified: file.lastModified + i
+                            };
+                            
+                            images.push(slicedImg);
+                        }
                     }
 
                     loadedCount++;
                     if (loadedCount === files.length) {
-                        // 少し時間を置いてDataURLの生成完了を待ってから処理
                         setTimeout(() => {
                             finalizeImageLoading(skippedCount);
                         }, 200);
@@ -420,7 +428,7 @@
             updateRequirements();
             fileInput.value = ""; 
 
-            let msg = `1枚の画像を ${getSelectedSplitCount()} 分割にスライスしました。\n現在、合計 ${images.length} 個の画像パーツが保持されています。`;
+            let msg = `画像の読み込みが完了しました。\n(縦写真のみ自動でスライス処理を適用しました)\n現在、合計 ${images.length} 個の素材が保持されています。`;
             if (skippedCount > 0) {
                 msg += `\n(重複した画像 ${skippedCount} 枚を自動でスキップしました)`;
             }
@@ -436,7 +444,6 @@
             ctx.fillStyle = bgColor;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // 切り分けた画像を枠に合わせて拡大フィットさせる
             function drawImageWithFullStretch(img, offsetY) {
                 const padding = 20; 
                 const maxW = paneW - (padding * 2);
