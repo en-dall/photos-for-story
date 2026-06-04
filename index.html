@@ -153,7 +153,6 @@
         button:hover { background: #0063cc; }
         button:disabled { background: #444; color: #888; cursor: not-allowed; }
         
-        /* クリアボタンのスタイル */
         .clear-btn {
             background: #3a3a3a;
             border: 1px solid #555;
@@ -263,7 +262,6 @@
         const bgColorInput = document.getElementById('bg-color');
         const fpsInfo = document.getElementById('fps-info');
 
-        // 内部に保持する永続画像リスト
         let images = [];
         let animationId = null;
         let mediaRecorder = null;
@@ -345,10 +343,9 @@
             radio.addEventListener('change', updateRequirements);
         });
 
-        // 選択解除（クリア）ボタンの挙動
         clearBtn.addEventListener('click', () => {
             images = [];
-            fileInput.value = ""; // フォームを初期化
+            fileInput.value = ""; 
             updateRequirements();
             alert('選択されていた画像をすべてクリアしました。');
         });
@@ -361,7 +358,6 @@
             let skippedCount = 0;
 
             files.forEach((file) => {
-                // 重複チェック：ファイル名、容量、更新日時がすべて一致するものが既存リストにあればスキップ
                 const isDuplicate = images.some(existingImg => 
                     existingImg._meta &&
                     existingImg._meta.name === file.name &&
@@ -372,7 +368,6 @@
                 if (isDuplicate) {
                     skippedCount++;
                     loadedCount++;
-                    // すべてのファイルの評価が終わったか判定
                     if (loadedCount === files.length) {
                         finalizeImageLoading(skippedCount);
                     }
@@ -382,7 +377,6 @@
                 const img = new Image();
                 img.src = URL.createObjectURL(file);
                 
-                // 重複判定に使うメタデータを画像オブジェクトに隠し持たせる
                 img._meta = {
                     name: file.name,
                     size: file.size,
@@ -399,13 +393,10 @@
             });
         });
 
-        // 画像の追加読み込み、重複排除、および再ソートの最終処理
         function finalizeImageLoading(skippedCount) {
-            // リスト全体をもう一度最初から「タイムスタンプ（更新日時）が古い順」に完全再ソート
             images.sort((a, b) => a._meta.lastModified - b._meta.lastModified);
-            
             updateRequirements();
-            fileInput.value = ""; // 追加読み込みを連続して行えるようにリセット
+            fileInput.value = ""; 
 
             let msg = `現在、合計 ${images.length} 枚の画像が保持されています。`;
             if (skippedCount > 0) {
@@ -423,28 +414,66 @@
             ctx.fillStyle = bgColor;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            function drawImageWithMargin(img, offsetY) {
+            // 背景ボカシ ＋ 全面フィット（見切れなし）のハイブリッド描画関数
+            function drawImageWithBlurBackground(img, offsetY) {
                 const padding = 20; 
                 const maxW = paneW - (padding * 2);
                 const maxH = paneH - (padding * 2);
 
+                const drawX = padding;
+                const drawY = offsetY + padding;
+
                 const imgRatio = img.width / img.height;
                 const targetRatio = maxW / maxH;
-                
-                let drawW, drawH, drawX, drawY;
 
+                ctx.save();
+                
+                // 1. クリッピング（枠外にはみ出させない領域制限）
+                let clipPath = new Path2D();
+                clipPath.rect(drawX, drawY, maxW, maxH);
+                ctx.clip(clipPath);
+
+                // 2. 背面に枠いっぱいに広げたボカシ背景を描画
+                ctx.filter = 'blur(30px)'; // 30pxの強めのボカシを適用
+                
+                let bgW, bgH, bgX, bgY;
                 if (imgRatio > targetRatio) {
-                    drawW = maxW;
-                    drawH = maxW / imgRatio;
-                    drawX = padding;
-                    drawY = offsetY + padding + (maxH - drawH) / 2;
+                    bgW = maxW;
+                    bgH = maxW / imgRatio;
+                    bgX = drawX;
+                    bgY = drawY + (maxH - bgH) / 2;
                 } else {
-                    drawH = maxH;
-                    drawW = maxH * imgRatio;
-                    drawX = padding + (maxW - drawW) / 2;
-                    drawY = offsetY + padding;
+                    bgH = maxH;
+                    bgW = maxH * imgRatio;
+                    bgX = drawX + (maxW - bgW) / 2;
+                    bgY = drawY;
                 }
-                ctx.drawImage(img, drawX, drawY, drawW, drawH);
+                // 背景用に少しだけ余分に外側へ引き伸ばして黒い隙間を埋める
+                ctx.drawImage(img, drawX, drawY, maxW, maxH);
+                
+                // フィルター効果を一度解除
+                ctx.filter = 'none';
+
+                // 3. 背景の上に「うっすら黒い半透明マスク」をのせて、中央の写真を際立たせる
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                ctx.fillRect(drawX, drawY, maxW, maxH);
+
+                // 4. 前面に「見切れなし（Fit）」で本来の写真を綺麗に重ねる
+                let fitW, fitH, fitX, fitY;
+                if (imgRatio > targetRatio) {
+                    fitW = maxW;
+                    fitH = maxW / imgRatio;
+                    fitX = drawX;
+                    fitY = drawY + (maxH - fitH) / 2;
+                } else {
+                    fitH = maxH;
+                    fitW = maxH * imgRatio;
+                    fitX = drawX + (maxW - fitW) / 2;
+                    fitY = drawY;
+                }
+                ctx.drawImage(img, fitX, fitY, fitW, fitH);
+
+                ctx.restore();
             }
 
             if (sequenceStep < splitCount) {
@@ -452,7 +481,7 @@
                 currentIndex++;
                 
                 for (let i = 0; i <= sequenceStep; i++) {
-                    drawImageWithMargin(images[paneIndices[i] % images.length], paneH * i);
+                    drawImageWithBlurBackground(images[paneIndices[i] % images.length], paneH * i);
                 }
             } 
             else {
@@ -461,7 +490,7 @@
                 currentIndex++;
 
                 for (let i = 0; i < splitCount; i++) {
-                    drawImageWithMargin(images[paneIndices[i] % images.length], paneH * i);
+                    drawImageWithBlurBackground(images[paneIndices[i] % images.length], paneH * i);
                 }
             }
 
