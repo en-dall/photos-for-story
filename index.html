@@ -379,17 +379,14 @@
                 srcImg.src = URL.createObjectURL(file);
                 
                 srcImg.onload = () => {
-                    // ★ 縦横比の自動判定ロジックを追加 ★
                     if (srcImg.width >= srcImg.height) {
-                        // 横長、または正方形の写真ならスライスせずにそのまま1枚の画像として扱う
                         srcImg._meta = {
                             name: file.name,
                             size: file.size,
-                            lastModified: file.lastModified
+                            lastModified: file.lastModified * 10 // ソート用の桁調整
                         };
                         images.push(srcImg);
                     } else {
-                        // 縦長の写真のときだけ、指定された分割数に合わせて裏で自動切断する
                         const sliceH = srcImg.height / splitCount;
                         
                         for (let i = 0; i < splitCount; i++) {
@@ -403,10 +400,11 @@
                             const slicedImg = new Image();
                             slicedImg.src = sliceCanvas.toDataURL('image/jpeg', 0.9);
                             
+                            // ★ タイムスタンプに「i」を加算し、確実に「上(0) → 中(1) → 下(2)」の順に並ぶようロック ★
                             slicedImg._meta = {
                                 name: `${file.name}_part${i}`,
                                 size: file.size,
-                                lastModified: file.lastModified + i
+                                lastModified: (file.lastModified * 10) + i
                             };
                             
                             images.push(slicedImg);
@@ -428,7 +426,7 @@
             updateRequirements();
             fileInput.value = ""; 
 
-            let msg = `画像の読み込みが完了しました。\n(縦写真のみ自動でスライス処理を適用しました)\n現在、合計 ${images.length} 個の素材が保持されています。`;
+            let msg = `画像の読み込みが完了しました。\n(縦写真のみ上から順に自動スライスを適用しました)\n現在、合計 ${images.length} 個の素材が保持されています。`;
             if (skippedCount > 0) {
                 msg += `\n(重複した画像 ${skippedCount} 枚を自動でスキップしました)`;
             }
@@ -472,6 +470,7 @@
                 ctx.drawImage(img, sx, sy, sWidth, sHeight, drawX, drawY, maxW, maxH);
             }
 
+            // ★ グリッドの描画段とスライスパーツの位置を「上から順」に完全同期させるロジック ★
             if (sequenceStep < splitCount) {
                 paneIndices[sequenceStep] = currentIndex;
                 currentIndex++;
@@ -481,6 +480,7 @@
                 }
             } 
             else {
+                // 常に上段(0) → 次の段(1) → の順でローテーションが綺麗に噛み合うように計算
                 const loopPos = (sequenceStep - splitCount) % splitCount;
                 paneIndices[loopPos] = currentIndex;
                 currentIndex++;
